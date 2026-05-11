@@ -15,8 +15,9 @@ class ORAPostprocessor(BasePostprocessor):
     decision boundary using the linear classifier weights, then measures
     the angle between (i) the feature vector and (ii) its boundary
     projection, both centered at the mean of the per-class training
-    feature means. The OOD score is the maximum such angle across
-    classes.
+    feature means. The OOD score aggregates these per-class angles via
+    `aggregation` (mean | max | min); mean is the default and gives the
+    best results across both CE- and SupCon-trained backbones.
     """
     def __init__(self, config):
         super(ORAPostprocessor, self).__init__(config)
@@ -24,6 +25,14 @@ class ORAPostprocessor(BasePostprocessor):
         self.setup_flag = False
         self.mean_of_class_means = None
         self.num_classes = None
+
+        self.args = self.config.postprocessor.postprocessor_args
+        self.aggregation = getattr(self.args, 'aggregation', 'mean')
+        if self.aggregation not in ('mean', 'max', 'min'):
+            raise ValueError(
+                f"aggregation must be one of 'mean', 'max', 'min'; "
+                f'got {self.aggregation!r}')
+        self.args_dict = self.config.postprocessor.postprocessor_sweep
 
     def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
         if not self.setup_flag:
@@ -79,6 +88,24 @@ class ORAPostprocessor(BasePostprocessor):
             trajectory[:,
                        c] = torch.arccos(cos_sim.clamp(-1.0, 1.0)) / torch.pi
 
-        trajectory = torch.nan_to_num(trajectory, nan=0.0)
-        score = trajectory.max(dim=1).values
+        # Diagonal entries (c == preds) are 0/0 -> NaN. For mean/max we
+        # treat them as 0 (matches the reference); for min we exclude them
+        # since 0 would otherwise dominate.
+        if self.aggregation == 'min':
+            trajectory = torch.where(torch.isnan(trajectory),
+                                     torch.full_like(trajectory, float('inf')),
+                                     trajectory)
+            score = trajectory.min(dim=1).values
+        else:
+            trajectory = torch.nan_to_num(trajectory, nan=0.0)
+            if self.aggregation == 'max':
+                score = trajectory.max(dim=1).values
+            else:
+                score = trajectory.mean(dim=1)
         return preds, score
+
+    def set_hyperparam(self, hyperparam: list):
+        self.aggregation = hyperparam[0]
+
+    def get_hyperparam(self):
+        return self.aggregation
