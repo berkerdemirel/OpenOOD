@@ -16,8 +16,9 @@ class ORAPostprocessor(BasePostprocessor):
     the angle between (i) the feature vector and (ii) its boundary
     projection, both centered at the mean of the per-class training
     feature means. The OOD score aggregates these per-class angles via
-    `aggregation` (mean | max | min); mean is the default and gives the
-    best results across both CE- and SupCon-trained backbones.
+    `aggregation` (mean | max | min). `mean` is the default and is the
+    recommended choice for CE-trained backbones; `max` is recommended
+    for SupCon-trained backbones.
     """
     def __init__(self, config):
         super(ORAPostprocessor, self).__init__(config)
